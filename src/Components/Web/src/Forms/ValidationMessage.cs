@@ -28,7 +28,7 @@ namespace Microsoft.AspNetCore.Components.Forms
         /// <summary>
         /// Specifies the field for which validation messages should be displayed.
         /// </summary>
-        [Parameter] public Expression<Func<TValue>>? For { get; set; }
+        [Parameter(Required = true)] public Expression<Func<TValue>> For { get; set; } = default!;
 
         /// <summary>`
         /// Constructs an instance of <see cref="ValidationMessage{TValue}"/>.

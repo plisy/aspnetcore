@@ -32,5 +32,14 @@ namespace Microsoft.AspNetCore.Components
         /// </para>
         /// </remarks>
         public bool CaptureUnmatchedValues { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value that indicates that a value for the parameter must be supplied.
+        /// <para>
+        /// Setting this property will ensure that a value for the parameter is supplied but does not ensure that the value is not <see langword="null" />.
+        /// This property cannot be used when <see cref="CaptureUnmatchedValues"/> is <see langword="true"/>.
+        /// </para>
+        /// </summary>
+        public bool Required { get; set; }
     }
 }

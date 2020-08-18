@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection.Emit;
 using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.AspNetCore.Components.Test.Helpers;
@@ -33,6 +34,20 @@ namespace Microsoft.AspNetCore.Components.Test
                 _ = _routeViewComponent.SetParametersAsync(ParameterView.Empty);
             });
 
+            Assert.Equal($"Component '{typeof(RouteView).FullName}' requires a value for the parameter '{nameof(RouteView.RouteData)}'.", ex.Message);
+        }
+
+        [Fact]
+        public void ThrowsIfNullRouteDataSupplied()
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+            {
+                // Throws synchronously, so no need to await
+                _ = _routeViewComponent.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string, object>
+                {
+                    { nameof(RouteView.RouteData), null },
+                }));
+            });
 
             Assert.Equal($"The {nameof(RouteView)} component requires a non-null value for the parameter {nameof(RouteView.RouteData)}.", ex.Message);
         }

@@ -23,5 +23,13 @@ namespace Microsoft.AspNetCore.Components
         /// type.
         /// </summary>
         public string? Name { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value that indicates that a value for the parameter must be supplied.
+        /// <para>
+        /// Setting this property will ensure that a value for the parameter is supplied but does not ensure that the value is not <see langword="null" />.
+        /// </para>
+        /// </summary>
+        public bool Required { get; set; }
     }
 }

@@ -45,7 +45,7 @@ namespace Microsoft.AspNetCore.Components.Reflection
             return dictionary.Values.SelectMany(p => p);
         }
 
-        public static IPropertySetter CreatePropertySetter(Type targetType, PropertyInfo property, bool cascading)
+        public static IPropertySetter CreatePropertySetter(Type targetType, PropertyInfo property, bool cascading, bool required)
         {
             if (property.SetMethod == null)
             {
@@ -57,21 +57,25 @@ namespace Microsoft.AspNetCore.Components.Reflection
             return (IPropertySetter)Activator.CreateInstance(
                 typeof(PropertySetter<,>).MakeGenericType(targetType, property.PropertyType),
                 property.SetMethod,
-                cascading)!;
+                cascading,
+                required)!;
         }
 
-        class PropertySetter<TTarget, TValue> : IPropertySetter where TTarget : notnull
+        sealed class PropertySetter<TTarget, TValue> : IPropertySetter where TTarget : notnull
         {
             private readonly Action<TTarget, TValue> _setterDelegate;
 
-            public PropertySetter(MethodInfo setMethod, bool cascading)
+            public PropertySetter(MethodInfo setMethod, bool cascading, bool required)
             {
                 _setterDelegate = (Action<TTarget, TValue>)Delegate.CreateDelegate(
                     typeof(Action<TTarget, TValue>), setMethod);
                 Cascading = cascading;
+                Required = required;
             }
 
             public bool Cascading { get; }
+
+            public bool Required { get; }
 
             public void SetValue(object target, object value)
             {

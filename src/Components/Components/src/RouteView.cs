@@ -24,7 +24,7 @@ namespace Microsoft.AspNetCore.Components
         /// Gets or sets the route data. This determines the page that will be
         /// displayed and the parameter values that will be supplied to the page.
         /// </summary>
-        [Parameter]
+        [Parameter(Required = true)]
         public RouteData RouteData { get; set; }
 
         /// <summary>

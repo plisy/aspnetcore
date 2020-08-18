@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
@@ -34,6 +35,7 @@ namespace Microsoft.AspNetCore.Components.Reflection
                 _cachedWritersByType[targetType] = writers;
             }
 
+            var requiredParametersWritten = 0;
             // The logic is split up for simplicity now that we have CaptureUnmatchedValues parameters.
             if (writers.CaptureUnmatchedValuesWriter == null)
             {
@@ -66,7 +68,7 @@ namespace Microsoft.AspNetCore.Components.Reflection
                         throw null; // Unreachable
                     }
 
-                    SetProperty(target, writer, parameterName, parameter.Value);
+                    SetProperty(target, writer, parameterName, parameter.Value, ref requiredParametersWritten);
                 }
             }
             else
@@ -104,7 +106,7 @@ namespace Microsoft.AspNetCore.Components.Reflection
                         }
                         else
                         {
-                            SetProperty(target, writer, parameterName, parameter.Value);
+                            SetProperty(target, writer, parameterName, parameter.Value, ref requiredParametersWritten);
                         }
                     }
                     else
@@ -140,11 +142,20 @@ namespace Microsoft.AspNetCore.Components.Reflection
                 else if (unmatched != null)
                 {
                     // We had some unmatched values, set the CaptureUnmatchedValues property
-                    SetProperty(target, writers.CaptureUnmatchedValuesWriter, writers.CaptureUnmatchedValuesPropertyName!, unmatched);
+                    SetProperty(target, writers.CaptureUnmatchedValuesWriter, writers.CaptureUnmatchedValuesPropertyName!, unmatched, ref requiredParametersWritten);
                 }
             }
 
-            static void SetProperty(object target, IPropertySetter writer, string parameterName, object value)
+            if (requiredParametersWritten < writers.RequiredParameterCount)
+            {
+                // Verify that we've written as many required parameters as are declared on the type. This test will incorrectly not throw,
+                // if ParameterView contains duplicate entries for a required parameter.
+                // Correctly performing this state requires additional state or complexity in a hot code path.
+                // Given that Razor compiler disallows duplicates attributes, we'll sacrifice correctness for some narrow cases for performance.
+                ThrowRequiredParametersNotSet(targetType, parameters, writers);
+            }
+
+            static void SetProperty(object target, IPropertySetter writer, string parameterName, object value, ref int requiredParametersWritten)
             {
                 try
                 {
@@ -156,11 +167,46 @@ namespace Microsoft.AspNetCore.Components.Reflection
                         $"Unable to set property '{parameterName}' on object of " +
                         $"type '{target.GetType().FullName}'. The error was: {ex.Message}", ex);
                 }
+
+                if (writer.Required)
+                {
+                    requiredParametersWritten++;
+                }
             }
         }
 
         internal static IEnumerable<PropertyInfo> GetCandidateBindableProperties(Type targetType)
             => MemberAssignment.GetPropertiesIncludingInherited(targetType, _bindablePropertyFlags);
+
+        [DoesNotReturn]
+        private static void ThrowRequiredParametersNotSet(Type targetType, ParameterView parameters, WritersForType writers)
+        {
+            // We know we're going to throw by this stage, so it doesn't matter that the following
+            // code is not optimized. We're just trying to help developers see what they did wrong.
+            var parametersNotSet = new List<string>();
+            var cascadingParametersNotSet = new List<string>();
+            var parameterDictionary = parameters.ToDictionary();
+
+            foreach (var (name, writer) in writers.Writers.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+            {
+                if (!writer.Required || parameterDictionary.ContainsKey(name))
+                {
+                    // Either the value is not required or it's specified.
+                    continue;
+                }
+
+                if (writer.Cascading)
+                {
+                    throw new InvalidOperationException($"Component '{targetType.FullName}' requires a value for the cascading parameter '{name}'.");
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Component '{targetType.FullName}' requires a value for the parameter '{name}'.");
+                }
+            }
+
+            Debug.Fail("Unreachable");
+        }
 
         [DoesNotReturn]
         private static void ThrowForUnknownIncomingParameterName(Type targetType, string parameterName)
@@ -235,6 +281,14 @@ namespace Microsoft.AspNetCore.Components.Reflection
         }
 
         [DoesNotReturn]
+        private static void ThrowForRequiredUnmatchedValuesParameter(Type targetType, string parameterName)
+        {
+            throw new InvalidOperationException(
+                $"Parameter {parameterName} on component type '{targetType.FullName}' cannot have both '{nameof(ParameterAttribute.CaptureUnmatchedValues)}' " +
+                $"and {nameof(ParameterAttribute.Required)} set.");
+        }
+
+        [DoesNotReturn]
         private static void ThrowForInvalidCaptureUnmatchedValuesParameterType(Type targetType, PropertyInfo propertyInfo)
         {
             throw new InvalidOperationException(
@@ -271,7 +325,20 @@ namespace Microsoft.AspNetCore.Components.Reflection
                             $"The type '{targetType.FullName}' declares a parameter matching the name '{propertyName}' that is not public. Parameters must be public.");
                     }
 
-                    var propertySetter = MemberAssignment.CreatePropertySetter(targetType, propertyInfo, cascading: cascadingParameterAttribute != null);
+                    IPropertySetter propertySetter;
+                    if (cascadingParameterAttribute != null)
+                    {
+                        propertySetter = MemberAssignment.CreatePropertySetter(targetType, propertyInfo, cascading: true, required: cascadingParameterAttribute.Required);
+                    }
+                    else
+                    {
+                        propertySetter = MemberAssignment.CreatePropertySetter(targetType, propertyInfo, cascading: false, required: parameterAttribute!.Required);
+                    }
+
+                    if (propertySetter.Required)
+                    {
+                        RequiredParameterCount++;
+                    }
 
                     if (_underlyingWriters.ContainsKey(propertyName))
                     {
@@ -298,15 +365,24 @@ namespace Microsoft.AspNetCore.Components.Reflection
                             ThrowForInvalidCaptureUnmatchedValuesParameterType(targetType, propertyInfo);
                         }
 
-                        CaptureUnmatchedValuesWriter = MemberAssignment.CreatePropertySetter(targetType, propertyInfo, cascading: false);
+                        if (parameterAttribute.Required)
+                        {
+                            ThrowForRequiredUnmatchedValuesParameter(targetType, propertyName);
+                        }
+
+                        CaptureUnmatchedValuesWriter = MemberAssignment.CreatePropertySetter(targetType, propertyInfo, cascading: false, required: false);
                         CaptureUnmatchedValuesPropertyName = propertyInfo.Name;
                     }
                 }
             }
 
+            public int RequiredParameterCount { get; }
+
             public IPropertySetter? CaptureUnmatchedValuesWriter { get; }
 
             public string? CaptureUnmatchedValuesPropertyName { get; }
+
+            public IReadOnlyDictionary<string, IPropertySetter> Writers => _underlyingWriters;
 
             public bool TryGetValue(string parameterName, [MaybeNullWhen(false)] out IPropertySetter writer)
             {

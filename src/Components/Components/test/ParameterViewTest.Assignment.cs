@@ -4,6 +4,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using Microsoft.AspNetCore.Components.Rendering;
 using Xunit;
@@ -384,6 +385,22 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
+        public void HasCapturedUnmatchedValuesParametersWithRequired_Throws()
+        {
+            // Arrange
+            var target = new HasRequiredCapturedUnmatchedValuesProperty();
+            var parameters = new ParameterViewBuilder().Build();
+            var expected = $"Parameter {nameof(HasRequiredCapturedUnmatchedValuesProperty.CaptureUnmatchedValuesProp)} on component type '{target.GetType().FullName}' cannot have both " +
+                $"'{nameof(ParameterAttribute.CaptureUnmatchedValues)}' and {nameof(ParameterAttribute.Required)} set.";
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() => parameters.SetParameterProperties(target));
+
+            // Assert
+            Assert.Equal(expected, ex.Message);
+        }
+
+        [Fact]
         public void HasCaptureUnmatchedValuesParameterWithWrongType_Throws()
         {
             // Arrange
@@ -531,6 +548,168 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
+        public void RequiredParameter_NoneSpecified()
+        {
+            // Arrange
+            var parameters = new ParameterViewBuilder().Build();
+            var target = new HasRequiredParameters();
+            var expected = $"Component '{target.GetType().FullName}' requires a value for the parameter '{nameof(HasRequiredParameters.IntProperty)}'.";
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                parameters.SetParameterProperties(target));
+
+            // Assert
+            Assert.Equal(expected, ex.Message);
+        }
+
+        [Fact]
+        public void RequiredParameter_SomeSpecified()
+        {
+            // Arrange
+            var parameters = new ParameterViewBuilder
+            {
+                { nameof(HasRequiredParameters.StringProperty), "some-value" },
+            }.Build();
+            var target = new HasRequiredParameters();
+            var expected = $"Component '{target.GetType().FullName}' requires a value for the parameter '{nameof(HasRequiredParameters.IntProperty)}'.";
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                parameters.SetParameterProperties(target));
+
+            // Assert
+            Assert.Equal(expected, ex.Message);
+        }
+
+        [Fact]
+        public void RequiredParameter_AllSpecified()
+        {
+            // Arrange
+            var parameters = new ParameterViewBuilder
+            {
+                { nameof(HasRequiredParameters.StringProperty), "some-value" },
+                { nameof(HasRequiredParameters.IntProperty), 7 },
+            }.Build();
+            var target = new HasRequiredParameters();
+
+            // Act
+            parameters.SetParameterProperties(target);
+
+            // Assert
+            Assert.Equal("some-value", target.StringProperty);
+            Assert.Equal(7, target.IntProperty);
+        }
+
+        [Fact]
+        public void RequiredParameter_SpecifyingNullValueWorks()
+        {
+            // Arrange
+            var parameters = new ParameterViewBuilder
+            {
+                { nameof(HasRequiredParameters.StringProperty), null },
+                { nameof(HasRequiredParameters.IntProperty), 7 },
+            }.Build();
+            var target = new HasRequiredParameters();
+
+            // Act
+            parameters.SetParameterProperties(target);
+
+            // Assert
+            Assert.Null(target.StringProperty);
+            Assert.Equal(7, target.IntProperty);
+        }
+
+        [Fact]
+        public void SomeRequiredParameter_NoneSpecified()
+        {
+            // Arrange
+            var parameters = new ParameterViewBuilder
+            {
+            }.Build();
+            var target = new SomeRequiredParameters();
+            var expected = $"Component '{target.GetType().FullName}' requires a value for the parameter '{nameof(SomeRequiredParameters.StringProperty)}'.";
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                parameters.SetParameterProperties(target));
+
+            // Assert
+            Assert.Equal(expected, ex.Message);
+        }
+
+        [Fact]
+        public void SomeRequiredParameter_RequiredParameterNotSpecified()
+        {
+            // Arrange
+            var parameters = new ParameterViewBuilder
+            {
+                { nameof(SomeRequiredParameters.IntProperty), 8 },
+            }.Build();
+            var target = new SomeRequiredParameters();
+            var expected = $"Component '{target.GetType().FullName}' requires a value for the parameter '{nameof(SomeRequiredParameters.StringProperty)}'.";
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                parameters.SetParameterProperties(target));
+
+            // Assert
+            Assert.Equal(expected, ex.Message);
+        }
+
+        [Fact]
+        public void SomeRequiredParameter_RequiredParameterSpecified()
+        {
+            // Arrange
+            var parameters = new ParameterViewBuilder
+            {
+                { nameof(SomeRequiredParameters.StringProperty), "some-value" },
+            }.Build();
+            var target = new SomeRequiredParameters();
+
+            // Act
+            parameters.SetParameterProperties(target);
+
+            // Assert
+            Assert.Equal("some-value", target.StringProperty);
+        }
+
+        [Fact]
+        public void RequiredCascadingParameter_NotSpecified()
+        {
+            // Arrange
+            var parameters = new ParameterViewBuilder
+            {
+                { nameof(RequiredCascadingParameter.IntProperty), 3 },
+            }.Build();
+            var target = new RequiredCascadingParameter();
+            var expected = $"Component '{target.GetType().FullName}' requires a value for the cascading parameter '{nameof(RequiredCascadingParameter.StringProperty)}'.";
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                parameters.SetParameterProperties(target));
+
+            // Assert
+            Assert.Equal(expected, ex.Message);
+        }
+
+        [Fact]
+        public void RequiredCascadingParameter_Specified()
+        {
+            // Arrange
+            var builder = new ParameterViewBuilder();
+            builder.Add(nameof(RequiredCascadingParameter.StringProperty), "some-value", cascading: true);
+            var parameters = builder.Build();
+            var target = new RequiredCascadingParameter();
+
+            // Act
+            parameters.SetParameterProperties(target);
+
+            // Assert
+            Assert.Equal("some-value", target.StringProperty);
+        }
+
+        [Fact]
         public void SupplyingNullWritesDefaultForType()
         {
             // Arrange
@@ -641,11 +820,43 @@ namespace Microsoft.AspNetCore.Components
             [Parameter(CaptureUnmatchedValues = true)] public KeyValuePair<string, object>[] CaptureUnmatchedValuesProp { get; set; }
         }
 
+        class HasRequiredCapturedUnmatchedValuesProperty
+        {
+            [Parameter(CaptureUnmatchedValues = true, Required = true)] public IDictionary<string, object> CaptureUnmatchedValuesProp { get; set; }
+        }
+
         class HasNonPublicCascadingParameter
         {
             [CascadingParameter] private string Cascading { get; set; }
 
             public string GetCascadingValue() => Cascading;
+        }
+
+        class HasRequiredParameters
+        {
+            [Parameter(Required = true)]
+            public string StringProperty { get; set; }
+
+            [Parameter(Required = true)]
+            public int IntProperty { get; set; }
+        }
+
+        class SomeRequiredParameters
+        {
+            [Parameter(Required = true)]
+            public string StringProperty { get; set; }
+
+            [Parameter]
+            public int IntProperty { get; set; }
+        }
+
+        class RequiredCascadingParameter
+        {
+            [CascadingParameter(Required = true)]
+            public string StringProperty { get; set; }
+
+            [Parameter]
+            public int IntProperty { get; set; }
         }
 
         class ParameterViewBuilder : IEnumerable
