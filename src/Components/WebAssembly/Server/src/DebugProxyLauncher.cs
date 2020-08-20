@@ -48,7 +48,7 @@ namespace Microsoft.AspNetCore.Builder
             var processStartInfo = new ProcessStartInfo
             {
                 FileName = muxerPath,
-                Arguments = $"exec \"{executablePath}\"",
+                Arguments = $"exec \"{executablePath}\" --owner-pid {ownerPid}",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
             };
