@@ -13,6 +13,6 @@
     <Reference Include="Microsoft.Extensions.Caching.Abstractions" />
     <Reference Include="Microsoft.Extensions.Logging" />
     <Reference Include="Microsoft.Extensions.Identity.Core" />
- </ItemGroup>
+  </ItemGroup>
 
 </Project>
