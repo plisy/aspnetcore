@@ -35,7 +35,7 @@ namespace Microsoft.AspNetCore.Components.Reflection
                 _cachedWritersByType[targetType] = writers;
             }
 
-            var requiredParametersWritten = 0;
+            var requiredParametersWritten = 0u;
             // The logic is split up for simplicity now that we have CaptureUnmatchedValues parameters.
             if (writers.CaptureUnmatchedValuesWriter == null)
             {
@@ -146,16 +146,13 @@ namespace Microsoft.AspNetCore.Components.Reflection
                 }
             }
 
-            if (requiredParametersWritten < writers.RequiredParameterCount)
+            if (requiredParametersWritten != writers.RequiredParametersMap)
             {
-                // Verify that we've written as many required parameters as are declared on the type. This test will incorrectly not throw,
-                // if ParameterView contains duplicate entries for a required parameter.
-                // Correctly performing this state requires additional state or complexity in a hot code path.
-                // Given that Razor compiler disallows duplicates attributes, we'll sacrifice correctness for some narrow cases for performance.
+                // Verify that we've written all the required parameters.
                 ThrowRequiredParametersNotSet(targetType, parameters, writers);
             }
 
-            static void SetProperty(object target, IPropertySetter writer, string parameterName, object value, ref int requiredParametersWritten)
+            static void SetProperty(object target, PropertySetter writer, string parameterName, object value, ref uint requiredParametersWritten)
             {
                 try
                 {
@@ -170,7 +167,7 @@ namespace Microsoft.AspNetCore.Components.Reflection
 
                 if (writer.Required)
                 {
-                    requiredParametersWritten++;
+                    requiredParametersWritten |= (uint)(1 << writer.RequiredParameterId);
                 }
             }
         }
@@ -300,13 +297,15 @@ namespace Microsoft.AspNetCore.Components.Reflection
         private class WritersForType
         {
             private const int MaxCachedWriterLookups = 100;
-            private readonly Dictionary<string, IPropertySetter> _underlyingWriters;
-            private readonly ConcurrentDictionary<string, IPropertySetter?> _referenceEqualityWritersCache;
+            private readonly Dictionary<string, PropertySetter> _underlyingWriters;
+            private readonly ConcurrentDictionary<string, PropertySetter?> _referenceEqualityWritersCache;
 
             public WritersForType(Type targetType)
             {
-                _underlyingWriters = new Dictionary<string, IPropertySetter>(StringComparer.OrdinalIgnoreCase);
-                _referenceEqualityWritersCache = new ConcurrentDictionary<string, IPropertySetter?>(ReferenceEqualityComparer.Instance);
+                _underlyingWriters = new Dictionary<string, PropertySetter>(StringComparer.OrdinalIgnoreCase);
+                _referenceEqualityWritersCache = new ConcurrentDictionary<string, PropertySetter?>(ReferenceEqualityComparer.Instance);
+
+                var requiredParameterId = 0;
 
                 foreach (var propertyInfo in GetCandidateBindableProperties(targetType))
                 {
@@ -325,19 +324,36 @@ namespace Microsoft.AspNetCore.Components.Reflection
                             $"The type '{targetType.FullName}' declares a parameter matching the name '{propertyName}' that is not public. Parameters must be public.");
                     }
 
-                    IPropertySetter propertySetter;
+                    PropertySetter propertySetter;
                     if (cascadingParameterAttribute != null)
                     {
-                        propertySetter = MemberAssignment.CreatePropertySetter(targetType, propertyInfo, cascading: true, required: cascadingParameterAttribute.Required);
+                        propertySetter = new PropertySetter(targetType, propertyInfo)
+                        {
+                            RequiredParameterId = requiredParameterId,
+                            Cascading = true,
+                            Required = cascadingParameterAttribute.Required,
+                        };
                     }
                     else
                     {
-                        propertySetter = MemberAssignment.CreatePropertySetter(targetType, propertyInfo, cascading: false, required: parameterAttribute!.Required);
+                        propertySetter = new PropertySetter(targetType, propertyInfo)
+                        {
+                            Cascading = false,
+                            Required = parameterAttribute!.Required
+                        };
                     }
 
                     if (propertySetter.Required)
                     {
-                        RequiredParameterCount++;
+                        if (requiredParameterId == 32)
+                        {
+                            // Our bit-mask only allows up to 32 values. We think it's uncommon to need this many parameters, so fail loudly
+                            // if this limit is exceeded.
+                            throw new NotSupportedException($"The component '{targetType.FullName}' declares more than 32 'required' parameters. A component may have at most 32 required parameters.");
+                        }
+
+                        RequiredParametersMap |= (uint)(1 << requiredParameterId);
+                        propertySetter.RequiredParameterId = requiredParameterId++;
                     }
 
                     if (_underlyingWriters.ContainsKey(propertyName))
@@ -370,21 +386,25 @@ namespace Microsoft.AspNetCore.Components.Reflection
                             ThrowForRequiredUnmatchedValuesParameter(targetType, propertyName);
                         }
 
-                        CaptureUnmatchedValuesWriter = MemberAssignment.CreatePropertySetter(targetType, propertyInfo, cascading: false, required: false);
+                        CaptureUnmatchedValuesWriter = new PropertySetter(targetType, propertyInfo)
+                        {
+                            Cascading = true,
+                            Required = false
+                        };
                         CaptureUnmatchedValuesPropertyName = propertyInfo.Name;
                     }
                 }
             }
 
-            public int RequiredParameterCount { get; }
+            public uint RequiredParametersMap { get; }
 
-            public IPropertySetter? CaptureUnmatchedValuesWriter { get; }
+            public PropertySetter? CaptureUnmatchedValuesWriter { get; }
 
             public string? CaptureUnmatchedValuesPropertyName { get; }
 
-            public IReadOnlyDictionary<string, IPropertySetter> Writers => _underlyingWriters;
+            public IReadOnlyDictionary<string, PropertySetter> Writers => _underlyingWriters;
 
-            public bool TryGetValue(string parameterName, [MaybeNullWhen(false)] out IPropertySetter writer)
+            public bool TryGetValue(string parameterName, [MaybeNullWhen(false)] out PropertySetter writer)
             {
                 // In intensive parameter-passing scenarios, one of the most expensive things we do is the
                 // lookup from parameterName to writer. Pre-5.0 that was because of the string hashing.

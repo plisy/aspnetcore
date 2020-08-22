@@ -103,6 +103,11 @@ namespace Wasm.Performance.Driver
                     includeMetadata: firstRun,
                     isStressRun: isStressRun);
 
+                if (!isStressRun)
+                {
+                    PrettyPrint(results);
+                }
+
                 firstRun = false;
             } while (isStressRun && !stressRunCancellation.IsCancellationRequested);
 
@@ -242,6 +247,17 @@ namespace Wasm.Performance.Driver
             builder.AppendLine("#EndJobStatistics");
 
             Console.WriteLine(builder);
+        }
+
+        static void PrettyPrint(BenchmarkResult benchmarkResult)
+        {
+            Console.WriteLine();
+            Console.WriteLine("| Name | Description | Duration | NumExecutions | ");
+            Console.WriteLine("--------------------------");
+            foreach (var result in benchmarkResult.ScenarioResults)
+            {
+                Console.WriteLine($"| {result.Descriptor.Name} | {result.Name} | {result.Duration} | {result.NumExecutions} |");
+            }
         }
 
         static IHost StartTestApp()

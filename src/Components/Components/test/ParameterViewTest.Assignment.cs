@@ -6,6 +6,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
 using Microsoft.AspNetCore.Components.Rendering;
 using Xunit;
 
@@ -548,7 +550,7 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
-        public void RequiredParameter_NoneSpecified()
+        public void RequiredParameter_NoneSpecified_Throws()
         {
             // Arrange
             var parameters = new ParameterViewBuilder().Build();
@@ -564,7 +566,7 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
-        public void RequiredParameter_SomeSpecified()
+        public void RequiredParameter_SomeSpecified_Throws()
         {
             // Arrange
             var parameters = new ParameterViewBuilder
@@ -583,7 +585,7 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
-        public void RequiredParameter_AllSpecified()
+        public void RequiredParameter_AllSpecified_DoesNotThrow()
         {
             // Arrange
             var parameters = new ParameterViewBuilder
@@ -599,6 +601,51 @@ namespace Microsoft.AspNetCore.Components
             // Assert
             Assert.Equal("some-value", target.StringProperty);
             Assert.Equal(7, target.IntProperty);
+        }
+
+        [Fact]
+        public void RequiredParameter_ParameterPresentMultipleTimesOtherMissing_Throws()
+        {
+            // Arrange
+            // In this case, the required parameter StringProperty is specified multiple times, but required
+            // parameter IntProperty is never specified.
+            var parameters = new ParameterViewBuilder
+            {
+                { nameof(HasRequiredParameters.StringProperty), "some-value" },
+                { nameof(HasRequiredParameters.StringProperty), "different-value" },
+            }.Build();
+            var target = new HasRequiredParameters();
+            var expected = $"Component '{target.GetType().FullName}' requires a value for the parameter '{nameof(SomeRequiredParameters.IntProperty)}'.";
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                parameters.SetParameterProperties(target));
+
+            // Assert
+            Assert.Equal(expected, ex.Message);
+        }
+
+        [Fact]
+        public void RequiredParameter_AllRequiredParametersPresent_Works()
+        {
+            // Arrange
+            // In this case, the required parameter StringProperty is specified multiple times, but required
+            // parameter IntProperty is never specified.
+            var parameters = new ParameterViewBuilder
+            {
+                { nameof(HasRequiredParameters.StringProperty), "some-value" },
+                { nameof(HasRequiredParameters.IntProperty), 8 },
+                { nameof(HasRequiredParameters.IntProperty), 9 },
+                { nameof(HasRequiredParameters.StringProperty), "different-value" },
+            }.Build();
+            var target = new HasRequiredParameters();
+
+            // Act
+            parameters.SetParameterProperties(target);
+
+            // Assert
+            Assert.Equal("different-value", target.StringProperty);
+            Assert.Equal(9, target.IntProperty);
         }
 
         [Fact]
@@ -621,7 +668,7 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
-        public void SomeRequiredParameter_NoneSpecified()
+        public void SomeRequiredParameter_NoneSpecified_Throws()
         {
             // Arrange
             var parameters = new ParameterViewBuilder
@@ -639,7 +686,7 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
-        public void SomeRequiredParameter_RequiredParameterNotSpecified()
+        public void SomeRequiredParameter_RequiredParameterNotSpecified_Throws()
         {
             // Arrange
             var parameters = new ParameterViewBuilder
@@ -658,7 +705,7 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
-        public void SomeRequiredParameter_RequiredParameterSpecified()
+        public void SomeRequiredParameter_RequiredParameterSpecified_DoesNotThrow()
         {
             // Arrange
             var parameters = new ParameterViewBuilder
@@ -675,7 +722,7 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
-        public void RequiredCascadingParameter_NotSpecified()
+        public void RequiredCascadingParameter_ValueNotSpecified_Throws()
         {
             // Arrange
             var parameters = new ParameterViewBuilder
@@ -694,7 +741,7 @@ namespace Microsoft.AspNetCore.Components
         }
 
         [Fact]
-        public void RequiredCascadingParameter_Specified()
+        public void RequiredCascadingParameter_ValueSpecified_DoesNotThrow()
         {
             // Arrange
             var builder = new ParameterViewBuilder();
@@ -707,6 +754,73 @@ namespace Microsoft.AspNetCore.Components
 
             // Assert
             Assert.Equal("some-value", target.StringProperty);
+        }
+
+        [Theory]
+        [InlineData(14)]
+        [InlineData(31)]
+        [InlineData(32)]
+        public void RequireParameter_WorksForTypeWithFewerThan33Parameters(int numRequiredParameters)
+        {
+            // Arrange
+            var builder = new ParameterViewBuilder();
+            for (var i = 0; i < numRequiredParameters; i++)
+            {
+                builder.Add($"Property{i}", "value", false);
+            }
+            var parameters = builder.Build();
+            var target = GenerateTypeWithNProperties(n: numRequiredParameters);
+
+            // Act
+            parameters.SetParameterProperties(target);
+
+            // If we go this far, it's good
+        }
+
+        [Theory]
+        [InlineData(33)]
+        [InlineData(59)]
+        public void RequiredParameter_ThrowsIfTypeHasMoreThan32Parameters(int numRequiredParameters)
+        {
+            // Arrange
+            var builder = new ParameterViewBuilder();
+            for (var i = 0; i < numRequiredParameters; i++)
+            {
+                builder.Add($"Property{i}", "value", false);
+            }
+            var parameters = builder.Build();
+            var target = GenerateTypeWithNProperties(n: numRequiredParameters);
+            var expected = $"The component '{target.GetType().FullName}' declares more than 32 'required' parameters. A component may have at most 32 required parameters.";
+
+            // Act & Assert
+            var ex = Assert.Throws<NotSupportedException>(() => parameters.SetParameterProperties(target));
+            Assert.Equal(expected, ex.Message);
+        }
+
+        private static object GenerateTypeWithNProperties(int n)
+        {
+            var assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("Test"), AssemblyBuilderAccess.RunAndCollect);
+            var module = assemblyBuilder.DefineDynamicModule("Default");
+            var typeBuilder = module.DefineType("MyComponent");
+            var parameterAttribute = typeof(ParameterAttribute).GetConstructor(Type.EmptyTypes);
+            var requiredProperty = typeof(ParameterAttribute).GetProperty(nameof(ParameterAttribute.Required));
+
+            for (var i = 0; i < n; i++)
+            {
+                var property = typeBuilder.DefineProperty($"Property{i}", PropertyAttributes.None, typeof(string), null);
+                property.SetCustomAttribute(new CustomAttributeBuilder(parameterAttribute, new object[0], namedProperties: new[] { requiredProperty }, new object[] { true }));
+                var attributes = MethodAttributes.Public | MethodAttributes.SpecialName | MethodAttributes.HideBySig;
+                var getMethod = typeBuilder.DefineMethod($"get-Property{i}", attributes, typeof(string), Type.EmptyTypes);
+                getMethod.GetILGenerator().ThrowException(typeof(Exception));
+                property.SetGetMethod(getMethod);
+
+                var setMethod = typeBuilder.DefineMethod($"set_Property{i}", attributes, typeof(void), new[] { typeof(string) });
+                setMethod.GetILGenerator().Emit(OpCodes.Ret);
+                property.SetSetMethod(setMethod);
+            }
+            var type = typeBuilder.CreateType();
+            var target = Activator.CreateInstance(type);
+            return target;
         }
 
         [Fact]
